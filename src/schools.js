@@ -45,3 +45,16 @@ export function filterSchools({ query = '', pathway = 'all', gender = 'all', max
     return true;
   });
 }
+
+// Extra reference location requested by the user; not part of the screenshot.
+// Campus address and approximate center: OpenStreetMap relation 11221427.
+// https://www.openstreetmap.org/relation/11221427 (checked 2026-10-12).
+export const referenceSchools = [{
+  id: 'yew-tee-primary',
+  name: 'Yew Tee Primary School',
+  short: 'Yew Tee Primary School',
+  level: 'Primary',
+  address: '10 Choa Chu Kang Street 64, Singapore 689100',
+  lat: 1.3967,
+  lng: 103.7510,
+}];

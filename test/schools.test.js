@@ -33,3 +33,17 @@ test('combines pathway, gender and numeric cutoff filters while retaining M anno
   assert.equal(filterSchools({ pathway: 'g3', maxScore: '8', affiliated: true }).length, 0);
   assert.ok(filterSchools({ pathway: 'g3', maxScore: '10' }).some(s => s.g3 === '10ᴹ'));
 });
+
+test('Yew Tee Primary is a separate reference location without secondary-school scores', async () => {
+  const { referenceSchools } = await import('../src/schools.js');
+  assert.equal(referenceSchools.length, 1);
+  const primary = referenceSchools[0];
+  assert.equal(primary.name, 'Yew Tee Primary School');
+  assert.equal(primary.level, 'Primary');
+  assert.equal(primary.address, '10 Choa Chu Kang Street 64, Singapore 689100');
+  assert.equal(primary.ip, undefined);
+  assert.equal(primary.g3, undefined);
+  assert.ok(!schools.some(school => school.id === primary.id));
+  assert.ok(primary.lat > 1.2 && primary.lat < 1.5);
+  assert.ok(primary.lng > 103.6 && primary.lng < 104.1);
+});

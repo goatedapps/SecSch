@@ -1,5 +1,4 @@
-import './style.css';
-import { schools, filterSchools, cutoff } from './schools.js';
+import { schools, referenceSchools, filterSchools, cutoff } from './schools.js';
 
 const icons = {
   arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 18 18 6M6 6h12v12"/></svg>',
@@ -7,14 +6,16 @@ const icons = {
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>',
 };
 const state = { query: '', pathway: 'all', gender: 'all', maxScore: '', affiliated: false, selected: null };
-let map, infoWindow, markers = [], mapLoading = false;
+let map, markerGroup, tileLayer;
+let markers = new Map();
+let tileErrors = 0;
 const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 
 document.querySelector('#app').innerHTML = `
   <header class="topbar">
-    <a class="brand" href="/" aria-label="School Atlas home"><span class="brand-icon">${icons.pin}</span><span>school<span class="brand-light">atlas</span><span class="brand-dot">.</span></span></a>
+    <a class="brand" href="./" aria-label="School Atlas home"><span class="brand-icon">${icons.pin}</span><span>school<span class="brand-light">atlas</span><span class="brand-dot">.</span></span></a>
     <span class="header-label">SINGAPORE SECONDARY SCHOOLS</span>
-    <button class="settings-button" id="open-settings">${icons.pin}<span>Map settings</span></button>
+    <button class="settings-button" id="map-help">${icons.pin}<span>About the map</span></button>
   </header>
   <main>
     <section class="intro"><div><div class="eyebrow"><span></span> A LITTLE CLARITY FOR YOUR NEXT CHAPTER</div><h1>Find your place<span>.</span></h1><p>Explore Singapore’s secondary schools, one neighbourhood at a time.</p></div><div class="intro-note"><span class="note-icon">${icons.arrow}</span><span>Different paths.<br><strong>A world of possibilities.</strong></span></div></section>
@@ -27,6 +28,7 @@ document.querySelector('#app').innerHTML = `
         <label class="affiliation"><input id="affiliated" type="checkbox" /><span>Show affiliated cut-offs</span><span class="toggle" aria-hidden="true"></span></label>
         <div class="list-heading"><span>SCHOOL</span><div><span>IP</span><span>G3</span></div></div>
         <div class="school-list" id="school-list" aria-label="Schools"></div>
+        <button class="reference-school" data-school="yew-tee-primary"><span class="primary-dot"></span><span><strong>Yew Tee Primary School</strong><small>Primary school · reference location</small></span></button>
         <div class="sidebar-footer"><span class="legend-dot"></span> IP · Integrated Programme <span class="divider">/</span> G3 · Posting Group 3</div>
       </aside>
       <section class="map-panel" aria-label="School locations">
@@ -35,10 +37,10 @@ document.querySelector('#app').innerHTML = `
           <div class="map-grid" aria-hidden="true"></div>
           <div class="island" aria-hidden="true"><span class="area-label area-west">WEST</span><span class="area-label area-central">CENTRAL</span><span class="area-label area-east">EAST</span><span class="island-label">S I N G A P O R E</span></div>
           <div id="schematic-pins" class="schematic-pins"></div>
-          <div class="map-connect"><span class="connect-icon">${icons.pin}</span><h2>Your next chapter, on the map.</h2><p>Connect Google Maps to explore real locations,<br>street views and directions.</p><button class="primary-button" id="connect-map">Connect Google Maps <span>${icons.arrow}</span></button><small>School details are ready to explore below.</small></div>
+          <div class="map-connect"><span class="connect-icon">${icons.pin}</span><h2>Your next chapter, on the map.</h2><p>The map could not load. You can still<br>search schools and explore their details.</p><button class="primary-button" id="reload-map">Retry map <span>${icons.arrow}</span></button><small>Internet access is needed for map tiles.</small></div>
           <div class="schematic-label">ILLUSTRATIVE OVERVIEW · NOT TO SCALE</div>
         </div>
-        <div class="map-top-label">${icons.pin}<span>Singapore</span><span class="live-dot"></span><span id="map-mode">School overview</span></div>
+        <div class="map-top-label">${icons.pin}<span>Singapore</span><span class="live-dot"></span><span id="map-mode">OpenStreetMap</span></div>
         <button class="fit-button" id="fit-map" title="Show all filtered schools" aria-label="Show all filtered schools">⌖</button>
         <div class="detail-card" id="detail-card" hidden></div>
         <div class="map-status" id="map-status" role="status" hidden></div>
@@ -46,7 +48,7 @@ document.querySelector('#app').innerHTML = `
     </section>
     <footer class="page-footer"><p>Made for the journey ahead.</p><p>Cut-offs transcribed from your image · Year unspecified · <button id="source-note">About this data ${icons.arrow}</button></p></footer>
   </main>
-  <dialog id="settings"><form method="dialog"><button class="dialog-close" aria-label="Close settings">×</button></form><div class="eyebrow">GOOGLE MAPS</div><h2>Put your schools on the map.</h2><p>Enter a browser API key with the <strong>Maps JavaScript API</strong> enabled and billing configured. Restrict it to your website’s HTTP referrers in Google Cloud.</p><form id="key-form"><label for="api-key">Google Maps API key</label><input id="api-key" type="password" autocomplete="off" placeholder="Enter your API key" required /><p class="key-note">Stored only in this browser’s local storage. Browser API keys are visible to website visitors; use referrer and API restrictions.</p><button class="primary-button" type="submit">Connect map ${icons.arrow}</button><button class="text-button" id="remove-key" type="button">Remove saved key</button></form><p class="key-note">You can also configure VITE_GOOGLE_MAPS_API_KEY in .env.local before starting the app.</p></dialog>
+  <dialog id="map-about"><form method="dialog"><button class="dialog-close" aria-label="Close map information">×</button></form><div class="eyebrow">OPENSTREETMAP</div><h2>A map without an API key.</h2><p>Explore locations with Leaflet and OpenStreetMap. No account, API key or billing setup is needed. Internet access is needed to load map tiles.</p><p><span class="legend-dot"></span> Green markers: secondary schools offering IP.<br><span class="g3-dot"></span> Terracotta markers: secondary schools offering G3 only.<br><span class="primary-dot"></span> Blue marker: Yew Tee Primary School, shown as a reference location.</p><p>Yew Tee Primary stays on the map when secondary-school filters change. Campus positions are approximate. Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a>.</p></dialog>
   <dialog id="about"><form method="dialog"><button class="dialog-close" aria-label="Close data information">×</button></form><div class="eyebrow">A NOTE ON THE NUMBERS</div><h2>Start exploring. Then verify.</h2><p>All 23 visible school rows and the first two score columns (IP and PG3 / G3) were transcribed from your screenshot. Affiliated scores are kept separately. “—” means no score shown in the image.</p><p>The superscript <strong>M</strong> is preserved exactly as shown; the image does not explain its meaning or state an admission year. Cut-off points are historical references, not admission guarantees. Confirm current criteria with MOE and each school.</p><p>The map uses approximate campus coordinates. Temasek Junior College is shown at its Tampines holding campus; confirm its location for your admission year.</p><p>“Cut-off up to” shows schools whose displayed cut-off is at or below your selected value. It is a filter on the source data, not an eligibility assessment.</p></dialog>
 `;
 
@@ -59,107 +61,106 @@ function render() {
     <button class="school-row ${state.selected === school.id ? 'selected' : ''}" data-school="${school.id}" aria-pressed="${state.selected === school.id}">
       <span class="school-number">${String(school.id).padStart(2, '0')}</span><span class="school-info"><span class="school-name">${escapeHtml(school.short)}</span><span class="school-meta">${school.gender}<span>·</span>${school.ip && school.g3 ? 'Dual pathway' : school.ip ? 'Integrated Programme' : 'Posting Group 3'}${state.affiliated && (school.affiliatedIp || school.affiliatedG3) ? '<span>·</span>Affiliated' : ''}</span></span><span class="scores"><span>${scoreHtml(cutoff(school, 'ip', state.affiliated))}</span><span>${scoreHtml(cutoff(school, 'g3', state.affiliated))}</span></span>
     </button>`).join('') : '<div class="empty"><h3>No schools found</h3><p>Try a different name or broaden your filters.</p><button id="reset-filters" class="text-button">Reset filters</button></div>';
-  if (!visible.some(s => s.id === state.selected)) { state.selected = null; document.querySelector('#detail-card').hidden = true; infoWindow?.close(); }
-  renderSchematic(visible);
+  if (![...visible, ...referenceSchools].some(s => s.id === state.selected)) { state.selected = null; document.querySelector('#detail-card').hidden = true; map?.closePopup(); }
+  document.querySelector('.reference-school').classList.toggle('selected', state.selected === 'yew-tee-primary');
+  renderSchematic([...visible, ...referenceSchools]);
   if (map) renderMarkers(visible);
 }
 function renderSchematic(visible) {
   document.querySelector('#schematic-pins').innerHTML = visible.map(school => {
     const left = 14 + ((school.lng - 103.70) / 0.25) * 73;
     const top = 58 - ((school.lat - 1.30) / 0.08) * 27;
-    return `<button class="schematic-pin ${school.ip ? 'ip-pin' : 'g3-pin'} ${state.selected === school.id ? 'selected' : ''}" style="left:${left}%;top:${top}%" data-school="${school.id}" aria-label="${escapeHtml(school.short)}">${school.id}</button>`;
+    return `<button class="schematic-pin ${school.level === 'Primary' ? 'primary-pin' : school.ip ? 'ip-pin' : 'g3-pin'} ${state.selected === school.id ? 'selected' : ''}" style="left:${left}%;top:${top}%" data-school="${school.id}" aria-label="${escapeHtml(school.short)}">${school.level === 'Primary' ? 'P' : school.id}</button>`;
   }).join('');
 }
 function selectSchool(id) {
-  const school = schools.find(s => s.id === id);
+  const school = [...schools, ...referenceSchools].find(s => s.id === id);
   if (!school) return;
   state.selected = id;
   render();
   const card = document.querySelector('#detail-card');
   card.hidden = false;
-  card.innerHTML = `<button class="detail-close" aria-label="Close school details">×</button><div class="eyebrow">${school.gender.toUpperCase()} · SCHOOL ${String(id).padStart(2, '0')}</div><h2>${escapeHtml(school.name)}</h2><p class="address">${icons.pin}${escapeHtml(school.address)}</p><div class="detail-scores"><div><span>IP CUT-OFF</span><strong>${scoreHtml(cutoff(school, 'ip', state.affiliated))}</strong></div><div><span>G3 CUT-OFF</span><strong>${scoreHtml(cutoff(school, 'g3', state.affiliated))}</strong></div>${school.affiliatedIp || school.affiliatedG3 ? `<div><span>AFFILIATED ${school.affiliatedIp ? 'IP' : 'G3'}</span><strong>${scoreHtml(school.affiliatedIp || school.affiliatedG3)}</strong></div>` : ''}</div><p class="detail-note">${state.affiliated && (school.affiliatedIp || school.affiliatedG3) ? 'Affiliated entry selected. ' : ''}Approximate campus location.${school.locationNote ? ` ${escapeHtml(school.locationNote)}` : ''}</p><a class="directions" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(school.short + ', ' + school.address)}" target="_blank" rel="noopener noreferrer">Get directions <span>${icons.arrow}</span></a>`;
-  card.querySelector('.detail-close').addEventListener('click', () => { state.selected = null; card.hidden = true; infoWindow?.close(); render(); });
+  card.innerHTML = `<button class="detail-close" aria-label="Close school details">×</button><div class="eyebrow">${school.level === 'Primary' ? 'PRIMARY SCHOOL · REFERENCE LOCATION' : school.gender.toUpperCase() + ' · SCHOOL ' + String(id).padStart(2, '0')}</div><h2>${escapeHtml(school.name)}</h2><p class="address">${icons.pin}${escapeHtml(school.address)}</p>${school.level === 'Primary' ? '<p class="primary-note">A primary school reference location. IP and G3 secondary-school cut-offs do not apply.</p>' : `<div class="detail-scores"><div><span>IP CUT-OFF</span><strong>${scoreHtml(cutoff(school, 'ip', state.affiliated))}</strong></div><div><span>G3 CUT-OFF</span><strong>${scoreHtml(cutoff(school, 'g3', state.affiliated))}</strong></div>${school.affiliatedIp || school.affiliatedG3 ? `<div><span>AFFILIATED ${school.affiliatedIp ? 'IP' : 'G3'}</span><strong>${scoreHtml(school.affiliatedIp || school.affiliatedG3)}</strong></div>` : ''}</div>`}<p class="detail-note">${state.affiliated && (school.affiliatedIp || school.affiliatedG3) ? 'Affiliated entry selected. ' : ''}Approximate campus location.${school.locationNote ? ` ${escapeHtml(school.locationNote)}` : ''}</p><a class="directions" href="https://www.openstreetmap.org/?mlat=${school.lat}&mlon=${school.lng}#map=17/${school.lat}/${school.lng}" target="_blank" rel="noopener noreferrer">View on OpenStreetMap <span>${icons.arrow}</span></a>`;
+  card.querySelector('.detail-close').addEventListener('click', () => { state.selected = null; card.hidden = true; map?.closePopup(); render(); });
   if (map) {
-    map.panTo({ lat: school.lat, lng: school.lng });
-    map.setZoom(14);
-    const marker = markers.find(item => item.id === id)?.marker;
-    if (marker) {
-      infoWindow.setContent(`<div class="map-info"><strong>${escapeHtml(school.short)}</strong><p>IP: ${scoreHtml(cutoff(school, 'ip', state.affiliated))} &nbsp; G3: ${scoreHtml(cutoff(school, 'g3', state.affiliated))}</p><small>Approximate campus location</small></div>`);
-      infoWindow.open({ map, anchor: marker });
-    }
+    map.setView([school.lat, school.lng], 14);
+    if (map.getSize().x >= 500) markers.get(id)?.openPopup();
+    else { map.closePopup(); map.panBy([0, 90], { animate: false }); }
   }
 }
+function popupHtml(school) {
+  const scores = school.level === 'Primary' ? '<p>Primary school · reference location</p>' : `<p>IP: ${scoreHtml(cutoff(school, 'ip', state.affiliated))} &nbsp; G3: ${scoreHtml(cutoff(school, 'g3', state.affiliated))}</p>`;
+  return `<div class="map-info"><strong>${escapeHtml(school.short)}</strong>${scores}<small>Approximate campus location</small></div>`;
+}
 function renderMarkers(visible) {
-  markers.forEach(({ marker }) => marker.setMap(null));
-  markers = visible.map(school => {
-    const marker = new google.maps.Marker({ map, position: { lat: school.lat, lng: school.lng }, title: school.short, label: { text: String(school.id), color: '#ffffff', fontSize: '11px', fontWeight: '600' }, icon: { path: google.maps.SymbolPath.CIRCLE, scale: state.selected === school.id ? 17 : 13, fillColor: school.ip ? '#244f42' : '#bc7150', fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 2 } });
-    marker.addListener('click', () => selectSchool(school.id));
-    return { id: school.id, marker };
-  });
+  const mapSchools = [...visible, ...referenceSchools];
+  const activeIds = new Set(mapSchools.map(s => s.id));
+  for (const [id, marker] of markers) {
+    if (!activeIds.has(id)) { markerGroup.removeLayer(marker); markers.delete(id); }
+  }
+  for (const school of mapSchools) {
+    let marker = markers.get(school.id);
+    const kind = school.level === 'Primary' ? 'primary' : school.ip ? 'ip' : 'g3';
+    const icon = L.divIcon({ className: `school-marker ${kind}-marker${state.selected === school.id ? ' selected-marker' : ''}`, html: `<span>${school.level === 'Primary' ? 'P' : school.id}</span>`, iconSize: [28, 28], iconAnchor: [14, 14], popupAnchor: [0, -15] });
+    if (!marker) {
+      marker = L.marker([school.lat, school.lng], { title: school.short, alt: school.short, keyboard: true, icon }).addTo(markerGroup);
+      marker.bindPopup(popupHtml(school), { autoPanPaddingTopLeft: [20, 70], autoPanPaddingBottomRight: [20, 280] });
+      marker.on('click', () => selectSchool(school.id));
+      markers.set(school.id, marker);
+    } else {
+      marker.setIcon(icon);
+      marker.setPopupContent(popupHtml(school));
+    }
+    marker.getElement()?.setAttribute('aria-label', school.short);
+  }
 }
 function fitMap() {
   if (!map) return;
-  const visible = getVisible();
-  if (!visible.length) return;
-  const bounds = new google.maps.LatLngBounds();
-  visible.forEach(s => bounds.extend({ lat: s.lat, lng: s.lng }));
-  map.fitBounds(bounds, 65);
-  google.maps.event.addListenerOnce(map, 'idle', () => { if (map.getZoom() > 15) map.setZoom(15); });
+  const visible = [...getVisible(), ...referenceSchools];
+  map.fitBounds(L.latLngBounds(visible.map(s => [s.lat, s.lng])), { padding: [45, 65], maxZoom: 15 });
 }
 function showMapError(message) {
   const status = document.querySelector('#map-status');
   status.hidden = false;
-  status.textContent = message;
-  document.querySelector('#map-placeholder').hidden = false;
-  document.querySelector('#map-mode').textContent = 'School overview';
+  status.replaceChildren(document.createTextNode(message + ' '));
+  const retry = document.createElement('button');
+  retry.className = 'text-button';
+  retry.textContent = 'Retry';
+  retry.addEventListener('click', () => {
+    if (!map) { window.location.reload(); return; }
+    tileErrors = 0;
+    status.hidden = true;
+    tileLayer.redraw();
+  });
+  status.append(retry);
 }
-window.gm_authFailure = () => showMapError('Google Maps could not authorize this key. Check billing, API access and HTTP referrer restrictions in Google Cloud.');
-async function connectMap(key) {
-  if (mapLoading) return;
-  if (map) { showMapError('Reload the page to apply a different map key.'); return; }
-  mapLoading = true;
-  document.querySelector('#map-status').hidden = false;
-  document.querySelector('#map-status').textContent = 'Connecting to Google Maps…';
+function initMap() {
   try {
-    if (!window.google?.maps) {
-      await new Promise((resolve, reject) => {
-        window.initSchoolMap = resolve;
-        const script = document.createElement('script');
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&loading=async&callback=initSchoolMap&v=weekly`;
-        script.async = true;
-        const timer = setTimeout(() => { script.remove(); reject(new Error('timeout')); }, 20000);
-        script.onerror = () => { clearTimeout(timer); script.remove(); reject(new Error('network')); };
-        window.initSchoolMap = () => { clearTimeout(timer); resolve(); };
-        document.head.append(script);
-      });
-    }
-    map = new google.maps.Map(document.querySelector('#map'), { center: { lat: 1.34, lng: 103.83 }, zoom: 11, mapTypeControl: false, streetViewControl: true, fullscreenControl: false, clickableIcons: false, styles: [{ featureType: 'poi', stylers: [{ visibility: 'off' }] }, { featureType: 'water', stylers: [{ color: '#d5e8e5' }] }, { featureType: 'landscape', stylers: [{ color: '#f2f2e9' }] }] });
-    infoWindow = new google.maps.InfoWindow();
+    if (!window.L) throw new Error('Leaflet did not load');
+    map = L.map('map', { zoomControl: false, scrollWheelZoom: true }).setView([1.35, 103.82], 11);
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+    tileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>',
+      // Ordinary interactive viewing only: no tile prefetching or offline downloads.
+    }).addTo(map);
+    tileLayer.on('tileerror', () => { tileErrors += 1; showMapError('Some map tiles could not load. Check your connection; school markers and details still work.'); });
+    tileLayer.on('tileload', () => { if (!tileErrors) document.querySelector('#map-status').hidden = true; });
+    markerGroup = L.layerGroup().addTo(map);
     document.querySelector('#map-placeholder').hidden = true;
-    document.querySelector('#map-status').hidden = true;
-    document.querySelector('#map-mode').textContent = 'Google Maps';
     renderMarkers(getVisible());
     fitMap();
   } catch {
-    showMapError('Could not load Google Maps. Check your connection and API key, then try again in Map settings.');
-  } finally { mapLoading = false; }
+    document.querySelector('#map-placeholder').hidden = false;
+    document.querySelector('#map-mode').textContent = 'School overview';
+    showMapError('The map library could not load. Reload the page to try again.');
+  }
 }
-
-const settings = document.querySelector('#settings');
-function readSavedKey() { try { return localStorage.getItem('school-atlas-maps-key') || ''; } catch { return ''; } }
-function openSettings() { document.querySelector('#api-key').value = readSavedKey(); settings.showModal(); }
-document.querySelector('#open-settings').addEventListener('click', openSettings);
-document.querySelector('#connect-map').addEventListener('click', openSettings);
+document.querySelector('#map-help').addEventListener('click', () => document.querySelector('#map-about').showModal());
+document.querySelector('#reload-map').addEventListener('click', () => window.location.reload());
 document.querySelector('#source-note').addEventListener('click', () => document.querySelector('#about').showModal());
-document.querySelector('#key-form').addEventListener('submit', event => {
-  event.preventDefault();
-  const key = document.querySelector('#api-key').value.trim();
-  if (!key) return;
-  try { localStorage.setItem('school-atlas-maps-key', key); } catch { /* The current connection still works without storage. */ }
-  settings.close();
-  if (window.google?.maps) window.location.reload(); else connectMap(key);
-});
-document.querySelector('#remove-key').addEventListener('click', () => { try { localStorage.removeItem('school-atlas-maps-key'); } catch { /* Storage may be disabled. */ } document.querySelector('#api-key').value = ''; settings.close(); window.location.reload(); });
+// Remove the obsolete saved Google browser key without reading or using it.
+try { localStorage.removeItem('school-atlas-maps-key'); } catch { /* Storage may be disabled. */ }
 document.querySelector('#search').addEventListener('input', event => { state.query = event.target.value; render(); });
 document.querySelector('#gender').addEventListener('change', event => { state.gender = event.target.value; render(); fitMap(); });
 document.querySelector('#score').addEventListener('change', event => { state.maxScore = event.target.value; render(); fitMap(); });
@@ -172,7 +173,7 @@ document.querySelectorAll('[data-pathway]').forEach(button => button.addEventLis
 document.querySelector('#fit-map').addEventListener('click', fitMap);
 document.querySelector('.workspace').addEventListener('click', event => {
   const row = event.target.closest('[data-school]');
-  if (row) selectSchool(Number(row.dataset.school));
+  if (row) selectSchool([...schools, ...referenceSchools].find(s => String(s.id) === row.dataset.school)?.id);
   if (event.target.closest('#reset-filters')) {
     Object.assign(state, { query: '', pathway: 'all', gender: 'all', maxScore: '', affiliated: false });
     document.querySelector('#search').value = '';
@@ -183,5 +184,4 @@ document.querySelector('.workspace').addEventListener('click', event => {
   }
 });
 render();
-const initialKey = readSavedKey() || import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-if (initialKey) connectMap(initialKey);
+initMap();

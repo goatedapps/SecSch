@@ -1,38 +1,43 @@
 # School Atlas
 
-A responsive map and searchable directory of Singapore secondary schools. Includes all 23 school rows visible in the supplied screenshot, IP and G3 cut-off points, and separate affiliated scores.
+A static HTML, JavaScript and CSS site with a Leaflet / OpenStreetMap map of Singapore schools. No API key, account, billing setup, Vite, build step, or npm installation is needed to run it.
 
-## Run locally
+Includes the 23 secondary schools from the supplied screenshot, IP/G3 cut-offs and separate affiliated scores. Yew Tee Primary School is an additional **blue reference marker**, always visible regardless of secondary-school filters. It has no IP/G3 scores.
 
-Requires Node.js 20.19+ or 22.12+ (Node 24 works).
+## View locally
 
-```sh
-npm ci
-npm run dev
-```
-
-Open the address printed by Vite. The directory, filters and school details work without a Google Maps key. The initial overview is an illustrative diagram, not a geographic map.
-
-## Google Maps
-
-1. Create a Google Cloud project with billing and **Maps JavaScript API** enabled.
-2. Create a browser API key and restrict it to Maps JavaScript API and your website's HTTP referrers. Include your local development origin when testing locally.
-3. Click **Map settings** in the app and enter the key. It is stored only in that browser's local storage. Alternatively, copy `.env.example` to `.env.local`, set `VITE_GOOGLE_MAPS_API_KEY`, and restart Vite. Deployment environment keys must be set before building.
-
-Browser keys are included in requests and frontend bundles, so use Google Cloud restrictions. Do not use a server credential. The map displays filtered markers and school cut-offs. Selecting a school opens details; **Get directions** opens Google Maps. The overview button fits the current filtered schools.
-
-## Checks and production build
+Serve this folder with any static web server. With Python installed:
 
 ```sh
-npm test
-npm run build
-npm run preview
+python3 -m http.server 5173
 ```
 
-Deploy the generated `dist/` folder to a static host. Configure allowed HTTP referrers for its domain.
+Open **http://localhost:5173**. Alternatively, `npm run dev` starts the same Python server. JavaScript uses native browser modules, so use HTTP rather than double-clicking `index.html` with a `file://` URL.
 
-## Data and limitations
+## Publish a website
 
-`src/schools.js` contains the transcription and approximate campus coordinates. The image does not state an admission year or explain the `M` annotation; both are explicitly described in the app. A dash means no score shown, rather than zero. The affiliated toggle uses the affiliated row for schools with one and keeps the general row for schools without an affiliated row. Cut-off filters compare displayed score values, not student eligibility.
+Upload `index.html`, `src/`, and `vendor/` together to any static host. There is no build command or `dist/` directory to deploy. All asset paths are relative, so hosting under a subdirectory works.
 
-Campus positions are approximate and are not entrance coordinates. Temasek Junior College is listed at its Tampines holding campus. Verify current locations and admission criteria with each school and MOE. There are no PG2 or PG1 columns in this app.
+For GitHub Pages, open the repository's **Settings → Pages**, choose **Deploy from a branch**, and select **main / (root)**. Once published, the site will be at `https://goatedapps.github.io/SecSch/`. Committing the files alone does not enable Pages.
+
+## Map
+
+Leaflet 1.9.4 is included locally in `vendor/leaflet/`, along with its license; no CDN is needed. Map tiles load from `https://tile.openstreetmap.org/`, so internet access is required. The map includes zoom controls, selectable school markers, cut-off popups, fit-to-schools, and location links to OpenStreetMap.
+
+Green markers identify schools offering IP, terracotta identifies G3-only schools, and blue identifies Yew Tee Primary. A tile-load error leaves markers, school details and filters available, with a retry button.
+
+The public OSM tile service permits ordinary interactive viewing under its [tile usage policy](https://operations.osmfoundation.org/policies/tiles/). Keep visible attribution and normal browser caching/referrers. This site does not prefetch or download offline tiles. For substantial traffic, use a suitable tile provider or your own tile server; the public service has no uptime guarantee.
+
+## Optional development checks
+
+Node.js is needed only for tests, not for serving or using the site. No npm dependencies are required.
+
+```sh
+node --test
+```
+
+## Data
+
+`src/schools.js` contains the screenshot transcription and approximate campus coordinates. The image does not identify an admission year or explain the `M` annotation; the app retains that annotation. A dash means no score shown. The affiliated toggle uses affiliated rows for schools with one and general rows for other schools. Cut-off filters compare source scores, not student eligibility.
+
+Yew Tee Primary is a separately maintained reference location, not part of the screenshot's secondary-school scores. Campus markers are approximate and are not entrance coordinates. Temasek Junior College is shown at its Tampines holding campus. Confirm current locations and admission criteria with each school and MOE.
