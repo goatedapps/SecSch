@@ -1,4 +1,5 @@
 import { schools, referenceSchools, filterSchools, cutoff } from './schools.js';
+import { commutePlan, getCommute } from './commutes.js';
 
 const icons = {
   arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 18 18 6M6 6h12v12"/></svg>',
@@ -49,7 +50,7 @@ document.querySelector('#app').innerHTML = `
     <footer class="page-footer"><p>Made for the journey ahead.</p><p>Cut-offs transcribed from your image · Year unspecified · <button id="source-note">About this data ${icons.arrow}</button></p></footer>
   </main>
   <dialog id="map-about"><form method="dialog"><button class="dialog-close" aria-label="Close map information">×</button></form><div class="eyebrow">OPENSTREETMAP</div><h2>A map without an API key.</h2><p>Explore locations with Leaflet and OpenStreetMap. No account, API key or billing setup is needed. Internet access is needed to load map tiles.</p><p><span class="legend-dot"></span> Green markers: secondary schools offering IP.<br><span class="g3-dot"></span> Terracotta markers: secondary schools offering G3 only.<br><span class="primary-dot"></span> Blue marker: Yew Tee Primary School, shown as a reference location.</p><p>Yew Tee Primary stays on the map when secondary-school filters change. Campus positions are approximate. Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a>.</p></dialog>
-  <dialog id="about"><form method="dialog"><button class="dialog-close" aria-label="Close data information">×</button></form><div class="eyebrow">A NOTE ON THE NUMBERS</div><h2>Start exploring. Then verify.</h2><p>All 23 visible school rows and the first two score columns (IP and PG3 / G3) were transcribed from your screenshot. Affiliated scores are kept separately. “—” means no score shown in the image.</p><p>The superscript <strong>M</strong> is preserved exactly as shown; the image does not explain its meaning or state an admission year. Cut-off points are historical references, not admission guarantees. Confirm current criteria with MOE and each school.</p><p>The map uses approximate campus coordinates. Temasek Junior College is shown at its Tampines holding campus; confirm its location for your admission year.</p><p>“Cut-off up to” shows schools whose displayed cut-off is at or below your selected value. It is a filter on the source data, not an eligibility assessment.</p></dialog>
+  <dialog id="about"><form method="dialog"><button class="dialog-close" aria-label="Close data information">×</button></form><div class="eyebrow">A NOTE ON THE NUMBERS</div><h2>Start exploring. Then verify.</h2><p>All 23 visible school rows and the first two score columns (IP and PG3 / G3) were transcribed from your screenshot. Affiliated scores are kept separately. “—” means no score shown in the image.</p><p>The superscript <strong>M</strong> is preserved exactly as shown; the image does not explain its meaning or state an admission year. Cut-off points are historical references, not admission guarantees. Confirm current criteria with MOE and each school.</p><p>The map uses approximate campus coordinates. Temasek Junior College is shown at its Tampines holding campus; confirm its location for your admission year.</p><p>Public-transport estimates are a Google Maps snapshot for departure from Yew Tee Primary School at 7am on Tuesday, 13 October 2026 (Singapore time), checked 12 October. Each school uses the earliest-arriving option returned for departure no earlier than 7am. Totals include walking, waiting and transfers. These are dated estimates; check the linked route before travelling.</p><p>“Cut-off up to” shows schools whose displayed cut-off is at or below your selected value. It is a filter on the source data, not an eligibility assessment.</p></dialog>
 `;
 
 function getVisible() { return filterSchools(state); }
@@ -59,7 +60,7 @@ function render() {
   document.querySelector('#school-count').textContent = `${visible.length} school${visible.length === 1 ? '' : 's'}`;
   document.querySelector('#school-list').innerHTML = visible.length ? visible.map(school => `
     <button class="school-row ${state.selected === school.id ? 'selected' : ''}" data-school="${school.id}" aria-pressed="${state.selected === school.id}">
-      <span class="school-number">${String(school.id).padStart(2, '0')}</span><span class="school-info"><span class="school-name">${escapeHtml(school.short)}</span><span class="school-meta">${school.gender}<span>·</span>${school.ip && school.g3 ? 'Dual pathway' : school.ip ? 'Integrated Programme' : 'Posting Group 3'}${state.affiliated && (school.affiliatedIp || school.affiliatedG3) ? '<span>·</span>Affiliated' : ''}</span></span><span class="scores"><span>${scoreHtml(cutoff(school, 'ip', state.affiliated))}</span><span>${scoreHtml(cutoff(school, 'g3', state.affiliated))}</span></span>
+      <span class="school-number">${String(school.id).padStart(2, '0')}</span><span class="school-info"><span class="school-name">${escapeHtml(school.short)}</span><span class="school-meta">${school.gender}<span>·</span>${school.ip && school.g3 ? 'Dual pathway' : school.ip ? 'Integrated Programme' : 'Posting Group 3'}${state.affiliated && (school.affiliatedIp || school.affiliatedG3) ? '<span>·</span>Affiliated' : ''}</span><span class="commute-preview">~${getCommute(school.id)?.totalMinutes ?? '—'} min from Yew Tee Primary · 7am</span></span><span class="scores"><span>${scoreHtml(cutoff(school, 'ip', state.affiliated))}</span><span>${scoreHtml(cutoff(school, 'g3', state.affiliated))}</span></span>
     </button>`).join('') : '<div class="empty"><h3>No schools found</h3><p>Try a different name or broaden your filters.</p><button id="reset-filters" class="text-button">Reset filters</button></div>';
   if (![...visible, ...referenceSchools].some(s => s.id === state.selected)) { state.selected = null; document.querySelector('#detail-card').hidden = true; map?.closePopup(); }
   document.querySelector('.reference-school').classList.toggle('selected', state.selected === 'yew-tee-primary');
@@ -73,6 +74,22 @@ function renderSchematic(visible) {
     return `<button class="schematic-pin ${school.level === 'Primary' ? 'primary-pin' : school.ip ? 'ip-pin' : 'g3-pin'} ${state.selected === school.id ? 'selected' : ''}" style="left:${left}%;top:${top}%" data-school="${school.id}" aria-label="${escapeHtml(school.short)}">${school.level === 'Primary' ? 'P' : school.id}</button>`;
   }).join('');
 }
+function commuteHtml(school) {
+  const commute = getCommute(school.id);
+  if (!commute) return '';
+  const arrival = new Intl.DateTimeFormat('en-SG', { timeZone: commutePlan.timeZone, hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(commute.arrival));
+  const steps = commute.steps.map((step, i) => {
+    const next = commute.steps[i + 1];
+    if (step.mode === 'walk') {
+      const destination = next?.from ? ` to ${next.from}` : i === commute.steps.length - 1 ? ' to school' : '';
+      return `<li class="route-step walk-step"><span class="route-mode">WALK</span><div><strong>Walk${escapeHtml(destination)}</strong><small>About ${step.minutes} min</small></div></li>`;
+    }
+    const services = step.services.map(service => service.name).join(' / ');
+    const towards = step.services.map(service => service.towards).filter(Boolean).join(' / ');
+    return `<li class="route-step ${step.mode}-step"><span class="route-mode">${escapeHtml(step.mode.toUpperCase())}</span><div><strong>${step.mode === 'bus' ? 'Bus ' : ''}${escapeHtml(services)}</strong><span>${escapeHtml(step.from)} → ${escapeHtml(step.to)}</span><small>About ${step.minutes} min${towards ? ` · towards ${escapeHtml(towards)}` : ''}</small></div></li>`;
+  }).join('');
+  return `<section class="commute-details" aria-label="Morning public transport route"><div class="commute-heading"><div><span>FROM YEW TEE PRIMARY</span><h3>Morning public transport</h3></div><strong class="commute-total">~${commute.totalMinutes}<small>minutes</small></strong></div><p class="commute-date">Tue, 13 Oct 2026 · leave at 7am SGT<br>Estimated arrival ${escapeHtml(arrival)}</p><ol class="route-steps">${steps}</ol><p class="commute-wait">${commute.waitMinutes ? `Includes about ${commute.waitMinutes} min of waiting, in addition to the legs above.` : 'Total includes walking and transfers.'}</p><p class="commute-source">Fastest arrival among ${commute.alternativesCompared} Google Maps options. Checked 12 Oct 2026; times may change.</p><a class="commute-link" href="${escapeHtml(commute.sourceUrl)}" target="_blank" rel="noopener noreferrer">Check the 7am route on Google Maps ${icons.arrow}</a></section>`;
+}
 function selectSchool(id) {
   const school = [...schools, ...referenceSchools].find(s => s.id === id);
   if (!school) return;
@@ -80,17 +97,13 @@ function selectSchool(id) {
   render();
   const card = document.querySelector('#detail-card');
   card.hidden = false;
-  card.innerHTML = `<button class="detail-close" aria-label="Close school details">×</button><div class="eyebrow">${school.level === 'Primary' ? 'PRIMARY SCHOOL · REFERENCE LOCATION' : school.gender.toUpperCase() + ' · SCHOOL ' + String(id).padStart(2, '0')}</div><h2>${escapeHtml(school.name)}</h2><p class="address">${icons.pin}${escapeHtml(school.address)}</p>${school.level === 'Primary' ? '<p class="primary-note">A primary school reference location. IP and G3 secondary-school cut-offs do not apply.</p>' : `<div class="detail-scores"><div><span>IP CUT-OFF</span><strong>${scoreHtml(cutoff(school, 'ip', state.affiliated))}</strong></div><div><span>G3 CUT-OFF</span><strong>${scoreHtml(cutoff(school, 'g3', state.affiliated))}</strong></div>${school.affiliatedIp || school.affiliatedG3 ? `<div><span>AFFILIATED ${school.affiliatedIp ? 'IP' : 'G3'}</span><strong>${scoreHtml(school.affiliatedIp || school.affiliatedG3)}</strong></div>` : ''}</div>`}<p class="detail-note">${state.affiliated && (school.affiliatedIp || school.affiliatedG3) ? 'Affiliated entry selected. ' : ''}Approximate campus location.${school.locationNote ? ` ${escapeHtml(school.locationNote)}` : ''}</p><a class="directions" href="https://www.openstreetmap.org/?mlat=${school.lat}&mlon=${school.lng}#map=17/${school.lat}/${school.lng}" target="_blank" rel="noopener noreferrer">View on OpenStreetMap <span>${icons.arrow}</span></a>`;
+  card.innerHTML = `<button class="detail-close" aria-label="Close school details">×</button><div class="eyebrow">${school.level === 'Primary' ? 'PRIMARY SCHOOL · REFERENCE LOCATION' : school.gender.toUpperCase() + ' · SCHOOL ' + String(id).padStart(2, '0')}</div><h2>${escapeHtml(school.name)}</h2><p class="address">${icons.pin}${escapeHtml(school.address)}</p>${school.level === 'Primary' ? '<p class="primary-note">A primary school reference location. IP and G3 secondary-school cut-offs do not apply.</p>' : `<div class="detail-scores"><div><span>IP CUT-OFF</span><strong>${scoreHtml(cutoff(school, 'ip', state.affiliated))}</strong></div><div><span>G3 CUT-OFF</span><strong>${scoreHtml(cutoff(school, 'g3', state.affiliated))}</strong></div>${school.affiliatedIp || school.affiliatedG3 ? `<div><span>AFFILIATED ${school.affiliatedIp ? 'IP' : 'G3'}</span><strong>${scoreHtml(school.affiliatedIp || school.affiliatedG3)}</strong></div>` : ''}</div>`}${school.level === 'Primary' ? '' : commuteHtml(school)}<p class="detail-note">${state.affiliated && (school.affiliatedIp || school.affiliatedG3) ? 'Affiliated entry selected. ' : ''}Approximate campus location.${school.locationNote ? ` ${escapeHtml(school.locationNote)}` : ''}</p><a class="directions" href="https://www.openstreetmap.org/?mlat=${school.lat}&mlon=${school.lng}#map=17/${school.lat}/${school.lng}" target="_blank" rel="noopener noreferrer">View on OpenStreetMap <span>${icons.arrow}</span></a>`;
+  card.scrollTop = 0;
   card.querySelector('.detail-close').addEventListener('click', () => { state.selected = null; card.hidden = true; map?.closePopup(); render(); });
   if (map) {
     map.setView([school.lat, school.lng], 14);
-    if (map.getSize().x >= 500) markers.get(id)?.openPopup();
-    else { map.closePopup(); map.panBy([0, 90], { animate: false }); }
+    map.panBy([0, 90], { animate: false });
   }
-}
-function popupHtml(school) {
-  const scores = school.level === 'Primary' ? '<p>Primary school · reference location</p>' : `<p>IP: ${scoreHtml(cutoff(school, 'ip', state.affiliated))} &nbsp; G3: ${scoreHtml(cutoff(school, 'g3', state.affiliated))}</p>`;
-  return `<div class="map-info"><strong>${escapeHtml(school.short)}</strong>${scores}<small>Approximate campus location</small></div>`;
 }
 function renderMarkers(visible) {
   const mapSchools = [...visible, ...referenceSchools];
@@ -104,12 +117,10 @@ function renderMarkers(visible) {
     const icon = L.divIcon({ className: `school-marker ${kind}-marker${state.selected === school.id ? ' selected-marker' : ''}`, html: `<span>${school.level === 'Primary' ? 'P' : school.id}</span>`, iconSize: [28, 28], iconAnchor: [14, 14], popupAnchor: [0, -15] });
     if (!marker) {
       marker = L.marker([school.lat, school.lng], { title: school.short, alt: school.short, keyboard: true, icon }).addTo(markerGroup);
-      marker.bindPopup(popupHtml(school), { autoPanPaddingTopLeft: [20, 70], autoPanPaddingBottomRight: [20, 280] });
       marker.on('click', () => selectSchool(school.id));
       markers.set(school.id, marker);
     } else {
       marker.setIcon(icon);
-      marker.setPopupContent(popupHtml(school));
     }
     marker.getElement()?.setAttribute('aria-label', school.short);
   }
